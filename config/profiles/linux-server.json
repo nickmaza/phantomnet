@@ -1,0 +1,21 @@
+{
+  "id": "linux-server",
+  "display_name": "Linux web server",
+  "description": "Ubuntu host running a self-hosted server administration panel.",
+  "high_value": false,
+  "http": {
+    "server_header": "nginx/1.24.0 (Ubuntu)",
+    "powered_by": "",
+    "title": "Server Admin — web-prd-03",
+    "product": "ServerPanel",
+    "version": "3.4.2",
+    "hostname": "web-prd-03",
+    "brand_color": "#2f6f4f",
+    "login_heading": "Sign in to ServerPanel",
+    "username_label": "Username",
+    "footer": "ServerPanel 3.4.2 · Ubuntu 22.04.4 LTS",
+    "breadcrumb_comment": "deploy user: svc_deploy (see /etc/serverpanel/deploy.env)",
+    "robots_disallow": ["/admin/", "/backup/", "/api/internal/"],
+    "extra_headers": {}
+  }
+}

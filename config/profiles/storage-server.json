@@ -1,0 +1,23 @@
+{
+  "id": "storage-server",
+  "display_name": "Storage appliance",
+  "description": "Network-attached storage appliance management interface.",
+  "high_value": true,
+  "http": {
+    "server_header": "lighttpd/1.4.69",
+    "powered_by": "",
+    "title": "StoreVault NAS — nas-bkp-01",
+    "product": "StoreVault OS",
+    "version": "7.2.1-64570",
+    "hostname": "nas-bkp-01",
+    "brand_color": "#1d4e89",
+    "login_heading": "StoreVault OS",
+    "username_label": "Account",
+    "footer": "StoreVault OS 7.2.1-64570 · Copyright © StoreVault",
+    "breadcrumb_comment": "replication account backup_admin — rotate before Q1 audit",
+    "robots_disallow": ["/webman/", "/volume1/"],
+    "extra_headers": {
+      "X-Content-Type-Options": "nosniff"
+    }
+  }
+}

@@ -1,0 +1,155 @@
+# PhantomNet v0.1 — network deception sensor
+#
+# Four services:
+#   phantomnet-decoys      OpenCanary SSH + MySQL simulations   (decoy ports only)
+#   phantomnet-web         Rotating simulated admin web portal  (decoy HTTP port only)
+#   phantomnet-controller  Profile rotation + health checks     (not exposed)
+#   phantomnet-core        Collector, correlation, alerts, UI   (dashboard on loopback only)
+#
+# Bindings default to 127.0.0.1 for localhost testing. After verification set
+# DECOY_BIND_IP in .env to the approved dedicated decoy address and apply
+# scripts/apply-isolation.sh. Never use network_mode: host.
+
+name: phantomnet
+
+x-hardening: &hardening
+  restart: unless-stopped
+  read_only: true
+  cap_drop: [ALL]
+  security_opt:
+    - no-new-privileges:true
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "3" }
+
+services:
+  phantomnet-decoys:
+    <<: *hardening
+    build:
+      context: services/decoys/protocol
+      args:
+        OPENCANARY_VERSION: ${OPENCANARY_VERSION:-0.9.5}
+    image: phantomnet/decoys:0.1.0
+    # Unprivileged: OpenCanary listens on 2222/3306 inside the container,
+    # so no capabilities are needed.
+    user: "10001:10001"
+    tmpfs:
+      - /tmp:size=16m
+      - /var/tmp:size=16m
+    volumes:
+      - ./config/opencanary.conf:/etc/opencanaryd/opencanary.conf:ro
+      - ./data/events:/data/events
+    networks: [decoy-net]
+    ports:
+      - "${DECOY_BIND_IP:-127.0.0.1}:${DECOY_SSH_PORT:-2222}:2222"
+      - "${DECOY_BIND_IP:-127.0.0.1}:${DECOY_MYSQL_PORT:-33060}:3306"
+    deploy:
+      resources:
+        limits: { cpus: "0.50", memory: 256M, pids: 128 }
+
+  phantomnet-web:
+    <<: *hardening
+    build: { context: ., dockerfile: Dockerfile }
+    image: phantomnet/app:0.1.0
+    command: ["python", "-m", "services.decoys.web.server"]
+    user: "10001:10001"
+    environment:
+      PN_PROFILES_DIR: /app/config/profiles
+      PN_STATE_DIR: /data/state
+      PN_EVENTS_DIR: /data/events
+      PN_NODE_ID: ${PN_NODE_ID:-phantomnet-01}
+      PN_WEB_PORT: "8080"
+      PN_HEALTH_PORT: "9090"
+    volumes:
+      - ./config:/app/config:ro
+      - ./data/state:/data/state:ro
+      - ./data/events:/data/events
+    networks: [decoy-net, backend-net]
+    ports:
+      - "${DECOY_BIND_IP:-127.0.0.1}:${DECOY_HTTP_PORT:-8080}:8080"
+    deploy:
+      resources:
+        limits: { cpus: "0.50", memory: 192M, pids: 128 }
+
+  phantomnet-controller:
+    <<: *hardening
+    image: phantomnet/app:0.1.0
+    command: ["python", "-m", "controller.rotator"]
+    user: "10001:10001"
+    depends_on: [phantomnet-web]
+    environment:
+      PN_PROFILES_DIR: /app/config/profiles
+      PN_POLICIES: /app/config/policies.yaml
+      PN_STATE_DIR: /data/state
+      PN_EVENTS_DIR: /data/events
+      PN_NODE_ID: ${PN_NODE_ID:-phantomnet-01}
+      PN_WEB_HEALTH_URL: http://phantomnet-web:9090/health
+    volumes:
+      - ./config:/app/config:ro
+      - ./data/state:/data/state
+      - ./data/events:/data/events
+    # Internal network only: no internet, no published ports, no Docker socket,
+    # no permission to touch host firewall rules.
+    networks: [backend-net]
+    deploy:
+      resources:
+        limits: { cpus: "0.25", memory: 128M, pids: 128 }
+
+  phantomnet-core:
+    <<: *hardening
+    image: phantomnet/app:0.1.0
+    command: ["python", "-m", "detection.core"]
+    user: "10001:10001"
+    depends_on: [phantomnet-web]
+    tmpfs:
+      - /tmp:size=16m
+    environment:
+      PN_POLICIES: /app/config/policies.yaml
+      PN_EVENTS_DIR: /data/events
+      PN_DB_PATH: /data/db/phantomnet.sqlite3
+      PN_STATE_DIR: /data/state
+      PN_WEB_HEALTH_URL: http://phantomnet-web:9090/health
+      PN_NODE_ID: ${PN_NODE_ID:-phantomnet-01}
+      PN_ADMIN_USER: ${PN_ADMIN_USER:-admin}
+      PN_ADMIN_PASSWORD: ${PN_ADMIN_PASSWORD:?Set PN_ADMIN_PASSWORD in .env}
+      PN_WEBHOOK_URL: ${PN_WEBHOOK_URL:-}
+      PN_SMTP_HOST: ${PN_SMTP_HOST:-}
+      PN_SMTP_PORT: ${PN_SMTP_PORT:-587}
+      PN_SMTP_USER: ${PN_SMTP_USER:-}
+      PN_SMTP_PASSWORD: ${PN_SMTP_PASSWORD:-}
+      PN_SMTP_FROM: ${PN_SMTP_FROM:-}
+      PN_SMTP_TO: ${PN_SMTP_TO:-}
+    volumes:
+      - ./config:/app/config:ro
+      - ./data/events:/data/events:ro
+      - ./data/state:/data/state:ro
+      - ./data/db:/data/db
+    # Core shares no network with any decoy. Web decoy health reaches it via the
+    # controller's status file. alert-net is a normal bridge so webhooks/email
+    # can leave; restrict its egress with scripts/apply-isolation.sh.
+    networks: [alert-net]
+    # Dashboard is loopback-only. Reach it through an SSH tunnel or VPN.
+    ports:
+      - "127.0.0.1:${DASHBOARD_PORT:-8800}:8800"
+    deploy:
+      resources:
+        limits: { cpus: "0.50", memory: 256M, pids: 128 }
+
+networks:
+  decoy-net:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.name: pn-decoy0
+      com.docker.network.bridge.enable_icc: "true"
+    ipam:
+      config:
+        - subnet: ${DECOY_SUBNET:-10.77.30.0/24}
+  backend-net:
+    driver: bridge
+    internal: true
+    driver_opts:
+      com.docker.network.bridge.name: pn-backend0
+  alert-net:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.name: pn-alert0

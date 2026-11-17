@@ -1,0 +1,15 @@
+[Unit]
+Description=PhantomNet decoy isolation rules
+After=docker.service network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# Wait for the compose networks to exist, then apply rules.
+ExecStartPre=/bin/sh -c 'for i in $(seq 1 30); do ip link show pn-decoy0 >/dev/null 2>&1 && exit 0; sleep 2; done; exit 1'
+ExecStart=@ROOT@/scripts/apply-isolation.sh
+ExecStop=@ROOT@/scripts/remove-isolation.sh
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,5 @@
+# PhantomNet runs on Linux: keep LF line endings everywhere, including on
+# Windows checkouts (CRLF breaks shell scripts and systemd units).
+* text=auto eol=lf
+*.png binary
+*.jpg binary

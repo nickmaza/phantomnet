@@ -1,0 +1,48 @@
+# PhantomNet detection and rotation policy.
+# Risk points are starting hypotheses — tune them against your own traffic.
+
+rotation:
+  enabled: true
+  # A random interval in [min, max] minutes between rotations.
+  interval_min_minutes: 30
+  interval_max_minutes: 60
+  # Profiles eligible for the rotating web decoy (ids from config/profiles/*.json).
+  web_profiles: [linux-server, storage-server, admin-portal]
+  health_timeout_seconds: 15
+
+correlation:
+  # An incident stays open while events keep arriving within this gap.
+  incident_idle_minutes: 30
+  # Window for the "several decoys contacted" rule.
+  multi_decoy_window_seconds: 120
+  multi_decoy_threshold: 3
+
+scoring:
+  high_value_connection: 25
+  authentication_attempt: 40
+  multi_decoy: 20
+  cross_service_attempts: 15
+  honeytoken: 50
+  max_score: 100
+
+severity:
+  # score >= value
+  medium: 40
+  high: 70
+
+alerts:
+  # Minimum severity that sends a notification (low | medium | high).
+  min_severity: medium
+
+# Authorized scanners (vulnerability scanners, monitoring). Their events are
+# stored and tagged but never raise incident scores or alerts.
+authorized_scanners: []
+  # - 10.77.10.50/32
+
+# Deliberately planted fake identities. Any use is high-confidence malicious.
+# Never put a real account name here.
+honeytokens:
+  usernames: [svc_deploy, backup_admin]
+
+# Decoy services considered high-value targets.
+high_value_services: [ssh, mysql]

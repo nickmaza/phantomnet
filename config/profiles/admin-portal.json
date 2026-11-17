@@ -1,0 +1,23 @@
+{
+  "id": "admin-portal",
+  "display_name": "Administrative portal",
+  "description": "Internal IT operations portal with single sign-on look and feel.",
+  "high_value": true,
+  "http": {
+    "server_header": "Apache/2.4.58 (Ubuntu)",
+    "powered_by": "PHP/8.2.12",
+    "title": "IT Operations Portal",
+    "product": "OpsConsole",
+    "version": "2024.3",
+    "hostname": "itops-portal",
+    "brand_color": "#5b2c83",
+    "login_heading": "IT Operations — Staff Sign-in",
+    "username_label": "Staff ID or email",
+    "footer": "OpsConsole 2024.3 · Authorized personnel only. Activity is monitored.",
+    "breadcrumb_comment": "TODO: remove legacy svc_deploy break-glass login after migration",
+    "robots_disallow": ["/admin/", "/phpmyadmin/", "/config/"],
+    "extra_headers": {
+      "X-Frame-Options": "SAMEORIGIN"
+    }
+  }
+}

@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="refresh" content="30">
+<title>{% block title %}PhantomNet Security Console{% endblock %}</title>
+<style>
+  :root { --bg:#0f141b; --panel:#171e28; --line:#273142; --text:#e6ebf2; --muted:#93a1b5;
+          --accent:#7aa2ff; --low:#5fb3a1; --medium:#e0b14f; --high:#ef6461; --info:#7aa2ff; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text);
+         font:14px/1.5 system-ui, "Segoe UI", Helvetica, Arial, sans-serif; }
+  a { color:var(--accent); text-decoration:none; } a:hover { text-decoration:underline; }
+  header { display:flex; justify-content:space-between; align-items:center; padding:14px 24px;
+           border-bottom:1px solid var(--line); }
+  header h1 { font-size:16px; margin:0; letter-spacing:.4px; }
+  header span { color:var(--muted); font-size:12px; }
+  main { max-width:1180px; margin:0 auto; padding:20px 16px 48px; }
+  .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:12px; }
+  .card, .panel { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:16px; }
+  .card .label { color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.5px; }
+  .card .value { font-size:28px; font-weight:600; margin-top:4px; }
+  .card .sub { color:var(--muted); font-size:12px; }
+  .grid2 { display:grid; grid-template-columns:3fr 2fr; gap:12px; margin-top:12px; }
+  @media (max-width: 860px) { .grid2 { grid-template-columns:1fr; } }
+  h2 { font-size:13px; text-transform:uppercase; letter-spacing:.5px; color:var(--muted); margin:0 0 12px; }
+  table { width:100%; border-collapse:collapse; }
+  th, td { text-align:left; padding:7px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--muted); font-weight:500; font-size:12px; }
+  .table-wrap { overflow-x:auto; }
+  .sev { display:inline-block; padding:1px 8px; border-radius:10px; font-size:12px; font-weight:600; }
+  .sev-low { background:rgba(95,179,161,.15); color:var(--low); }
+  .sev-medium { background:rgba(224,177,79,.15); color:var(--medium); }
+  .sev-high { background:rgba(239,100,97,.18); color:var(--high); }
+  .sev-info { background:rgba(122,162,255,.15); color:var(--info); }
+  .feed { list-style:none; margin:0; padding:0; }
+  .feed li { padding:10px 0; border-bottom:1px solid var(--line); }
+  .feed .t { color:var(--muted); font-size:12px; }
+  .muted { color:var(--muted); }
+  code, pre { font-family:ui-monospace, Consolas, monospace; font-size:12px; }
+  pre { background:#0b1016; border:1px solid var(--line); border-radius:6px; padding:10px; overflow:auto; }
+  .ok { color:var(--low); } .bad { color:var(--high); } .warn { color:var(--medium); }
+</style>
+</head>
+<body>
+<header>
+  <h1><a href="/" style="color:inherit">PhantomNet</a> <span>Security Console</span></h1>
+  <span>{% block sensor %}{% endblock %}</span>
+</header>
+<main>{% block content %}{% endblock %}</main>
+</body>
+</html>
