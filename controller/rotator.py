@@ -20,7 +20,7 @@ import urllib.request
 from pathlib import Path
 from typing import Callable
 
-from detection.policy import Policy, load_policy
+from detection.policy import Policy, load_policy, managed_dir
 from detection.schema import utc_now_iso
 
 from .profiles import ProfileError, load_profiles, validate_profile
@@ -161,15 +161,75 @@ class Rotator:
     def next_delay(self) -> float:
         return self.rng.uniform(self.policy.interval_min_minutes, self.policy.interval_max_minutes) * 60
 
+    # -- console-managed settings and requests --------------------------
+    policy_path: str | None = None
+    _managed_mtime: float | None = None
+
+    def reload_policy_if_changed(self) -> bool:
+        """Pick up rotation settings pushed from the cloud console."""
+        cfg = managed_dir() / "config.json"
+        try:
+            mtime = cfg.stat().st_mtime
+        except OSError:
+            return False
+        if mtime == self._managed_mtime:
+            return False
+        self._managed_mtime = mtime
+        try:
+            policy = load_policy(self.policy_path)
+        except Exception:
+            log.exception("ignoring invalid managed settings")
+            return False
+        eligible = [p for p in (policy.web_profiles or list(self.profiles)) if p in self.profiles]
+        if not eligible:
+            log.error("managed settings list no known personas; keeping current rotation set")
+            return False
+        self.policy, self.eligible = policy, eligible
+        log.info("applied console rotation settings (%s-%s min, enabled=%s)",
+                 policy.interval_min_minutes, policy.interval_max_minutes, policy.rotation_enabled)
+        return True
+
+    def process_requests(self) -> int:
+        """Run 'rotate now' requests queued by the console; write results for core."""
+        req_dir, res_dir = managed_dir() / "requests", self.state_dir / "action_results"
+        done = 0
+        for req in sorted(req_dir.glob("rotate-*.json")) if req_dir.exists() else []:
+            try:
+                data = json.loads(req.read_text(encoding="utf-8"))
+                aid = int(data["id"])
+            except (OSError, ValueError, KeyError, TypeError):
+                continue
+            res_path = res_dir / f"{aid}.json"
+            if res_path.exists():
+                continue
+            target = data.get("profile")
+            res_dir.mkdir(parents=True, exist_ok=True)
+            try:
+                if target and target not in self.profiles:
+                    raise ProfileError(f"unknown persona {target}")
+                ok = self.rotate(target)
+                state = self.read_state() or {}
+                result = {"id": aid, "status": "done" if ok else "failed",
+                          "result": {"rotated": ok, "active": state.get("profile_id")}}
+            except Exception as exc:
+                result = {"id": aid, "status": "failed", "result": {"error": str(exc)[:200]}}
+            atomic_write_json(res_path, result)
+            done += 1
+        return done
+
     def run_forever(self) -> None:
         self.ensure_initial()
+        self.reload_policy_if_changed()
         next_at = time.time() + self.next_delay()
         last_result = "initial"
+        last_status = 0.0
         while True:
+            if self.reload_policy_if_changed():
+                next_at = time.time() + self.next_delay()
+            if self.process_requests():
+                last_result = "manual rotation"
+                next_at = time.time() + self.next_delay()
             enabled = self.policy.rotation_enabled
-            self.write_status(rotation_enabled=enabled, next_rotation_at=next_at if enabled else None,
-                              last_result=last_result, active=(self.read_state() or {}).get("profile_id"),
-                              web_health=self.health_check() or {"ok": False, "error": "unreachable"})
             if enabled and time.time() >= next_at:
                 try:
                     last_result = "success" if self.rotate() else "rolled_back"
@@ -177,12 +237,17 @@ class Rotator:
                     log.exception("rotation error")
                     last_result = f"error: {exc}"
                 next_at = time.time() + self.next_delay()
-            time.sleep(min(30.0, max(1.0, next_at - time.time())))
+            if time.time() - last_status >= 30:
+                self.write_status(rotation_enabled=enabled, next_rotation_at=next_at if enabled else None,
+                                  last_result=last_result, active=(self.read_state() or {}).get("profile_id"),
+                                  web_health=self.health_check() or {"ok": False, "error": "unreachable"})
+                last_status = time.time()
+            time.sleep(5)
 
 
 def build_from_env(health_check: HealthCheck | None = None) -> Rotator:
     e = os.environ.get
-    return Rotator(
+    r = Rotator(
         profiles=load_profiles(e("PN_PROFILES_DIR", "config/profiles")),
         policy=load_policy(e("PN_POLICIES", "config/policies.yaml")),
         state_dir=e("PN_STATE_DIR", "data/state"),
@@ -190,6 +255,8 @@ def build_from_env(health_check: HealthCheck | None = None) -> Rotator:
         health_check=health_check or http_health_check(e("PN_WEB_HEALTH_URL", "http://127.0.0.1:9090/health")),
         node_id=e("PN_NODE_ID", "phantomnet-01"),
     )
+    r.policy_path = e("PN_POLICIES", "config/policies.yaml")
+    return r
 
 
 def main() -> None:

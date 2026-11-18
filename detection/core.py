@@ -12,7 +12,8 @@ from dashboard.app import DashboardSettings, create_app
 from .alerts import AlertDispatcher, AlertSettings
 from .collector import Collector, default_events_dir
 from .correlator import Correlator
-from .policy import load_policy
+from .cloud import from_env as cloud_from_env
+from .policy import load_policy, read_managed_config
 from .store import Store
 
 log = logging.getLogger("phantomnet.core")
@@ -32,15 +33,32 @@ def collector_loop(collector: Collector, stop: threading.Event, interval: float 
 def main() -> None:
     logging.basicConfig(level=os.environ.get("PN_LOG_LEVEL", "INFO"),
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    logging.getLogger("httpx").setLevel(logging.WARNING)  # one line per sync is noise
     settings = DashboardSettings.from_env()  # fail fast if credentials are missing
     policy = load_policy()
     store = Store(os.environ.get("PN_DB_PATH", "data/db/phantomnet.sqlite3"))
-    dispatcher = AlertDispatcher(store, policy, AlertSettings.from_env())
-    collector = Collector(default_events_dir(), store, Correlator(store, policy), dispatcher)
+    dispatcher = AlertDispatcher(store, policy, AlertSettings.from_env().with_managed(read_managed_config()))
+    correlator = Correlator(store, policy)
+    collector = Collector(default_events_dir(), store, correlator, dispatcher)
+
+    def apply_console_config(cfg: dict) -> None:
+        """Hot-reload policy and alert settings after the console pushes new settings."""
+        try:
+            new_policy = load_policy()
+        except Exception:
+            log.exception("console settings rejected; keeping current policy")
+            return
+        correlator.policy = dispatcher.policy = new_policy
+        dispatcher.settings = AlertSettings.from_env().with_managed(cfg)
 
     stop = threading.Event()
     t = threading.Thread(target=collector_loop, args=(collector, stop), daemon=True, name="collector")
     t.start()
+
+    cloud = cloud_from_env(store, dispatcher, on_config=apply_console_config)
+    if cloud:
+        log.info("cloud console sync enabled: %s", cloud.url)
+        threading.Thread(target=cloud.run, args=(stop,), daemon=True, name="cloud-sync").start()
 
     app = create_app(store, settings)
     try:

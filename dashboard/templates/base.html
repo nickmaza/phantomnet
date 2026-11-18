@@ -6,48 +6,46 @@
 <meta http-equiv="refresh" content="30">
 <title>{% block title %}PhantomNet Security Console{% endblock %}</title>
 <style>
-  :root { --bg:#0f141b; --panel:#171e28; --line:#273142; --text:#e6ebf2; --muted:#93a1b5;
-          --accent:#7aa2ff; --low:#5fb3a1; --medium:#e0b14f; --high:#ef6461; --info:#7aa2ff; }
+  :root { --bg:#0b0d0c; --fg:#c9d1c9; --dim:#6b756d; --green:#4ade80; --amber:#fbbf24;
+          --red:#f87171; --cyan:#67e8f9; --line:#2a312c; }
   * { box-sizing:border-box; }
-  body { margin:0; background:var(--bg); color:var(--text);
-         font:14px/1.5 system-ui, "Segoe UI", Helvetica, Arial, sans-serif; }
-  a { color:var(--accent); text-decoration:none; } a:hover { text-decoration:underline; }
-  header { display:flex; justify-content:space-between; align-items:center; padding:14px 24px;
-           border-bottom:1px solid var(--line); }
-  header h1 { font-size:16px; margin:0; letter-spacing:.4px; }
-  header span { color:var(--muted); font-size:12px; }
-  main { max-width:1180px; margin:0 auto; padding:20px 16px 48px; }
-  .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:12px; }
-  .card, .panel { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:16px; }
-  .card .label { color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.5px; }
-  .card .value { font-size:28px; font-weight:600; margin-top:4px; }
-  .card .sub { color:var(--muted); font-size:12px; }
-  .grid2 { display:grid; grid-template-columns:3fr 2fr; gap:12px; margin-top:12px; }
-  @media (max-width: 860px) { .grid2 { grid-template-columns:1fr; } }
-  h2 { font-size:13px; text-transform:uppercase; letter-spacing:.5px; color:var(--muted); margin:0 0 12px; }
-  table { width:100%; border-collapse:collapse; }
-  th, td { text-align:left; padding:7px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
-  th { color:var(--muted); font-weight:500; font-size:12px; }
-  .table-wrap { overflow-x:auto; }
-  .sev { display:inline-block; padding:1px 8px; border-radius:10px; font-size:12px; font-weight:600; }
-  .sev-low { background:rgba(95,179,161,.15); color:var(--low); }
-  .sev-medium { background:rgba(224,177,79,.15); color:var(--medium); }
-  .sev-high { background:rgba(239,100,97,.18); color:var(--high); }
-  .sev-info { background:rgba(122,162,255,.15); color:var(--info); }
-  .feed { list-style:none; margin:0; padding:0; }
-  .feed li { padding:10px 0; border-bottom:1px solid var(--line); }
-  .feed .t { color:var(--muted); font-size:12px; }
-  .muted { color:var(--muted); }
-  code, pre { font-family:ui-monospace, Consolas, monospace; font-size:12px; }
-  pre { background:#0b1016; border:1px solid var(--line); border-radius:6px; padding:10px; overflow:auto; }
-  .ok { color:var(--low); } .bad { color:var(--high); } .warn { color:var(--medium); }
+  html, body { margin:0; background:var(--bg); color:var(--fg); }
+  body { font:14px/1.55 ui-monospace, "Cascadia Mono", Consolas, "Liberation Mono", monospace; }
+  main { max-width:1100px; margin:0 auto; padding:16px; }
+  a { color:var(--cyan); text-decoration:none; } a:hover { text-decoration:underline; }
+  .prompt { color:var(--green); }
+  .dim { color:var(--dim); }
+  .ok { color:var(--green); } .warn { color:var(--amber); } .bad { color:var(--red); }
+  .sev-high { color:var(--red); font-weight:bold; }
+  .sev-medium { color:var(--amber); }
+  .sev-low, .sev-info { color:var(--cyan); }
+  h2 { font-size:14px; font-weight:normal; color:var(--green); margin:22px 0 6px; }
+  h2::before { content:"== "; } h2::after { content:" =="; }
+  pre, .block { margin:0; white-space:pre-wrap; word-break:break-word; }
+  table { border-collapse:collapse; width:100%; }
+  th, td { text-align:left; padding:1px 14px 1px 0; vertical-align:top; white-space:nowrap; }
+  td.wrap { white-space:normal; word-break:break-word; min-width:12ch; }
+  th { color:var(--dim); font-weight:normal; border-bottom:1px dashed var(--line); }
+  .scroll { overflow-x:auto; }
+  ul.plain { list-style:none; margin:0; padding:0; }
+  ul.plain li::before { content:"- "; color:var(--dim); }
+  .cursor { display:inline-block; width:8px; height:15px; background:var(--green);
+            vertical-align:text-bottom; animation:blink 1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity:0; } }
+  @media (max-width: 640px) {
+    main { padding:12px 16px; }
+    th, td { white-space:normal; padding-right:10px; }
+    td.wrap { min-width:0; }
+    .wide-only { display:none; }
+  }
+  footer { margin-top:24px; color:var(--dim); border-top:1px dashed var(--line); padding-top:6px; }
 </style>
 </head>
 <body>
-<header>
-  <h1><a href="/" style="color:inherit">PhantomNet</a> <span>Security Console</span></h1>
-  <span>{% block sensor %}{% endblock %}</span>
-</header>
-<main>{% block content %}{% endblock %}</main>
+<main>
+<div><span class="prompt">phantomnet@{% block sensor %}sensor{% endblock %}</span>:<span class="dim">{% block path %}~{% endblock %}</span>$ {% block cmd %}status{% endblock %}</div>
+{% block content %}{% endblock %}
+<footer>PhantomNet Security Console v0.1 · auto-refresh 30s · <a href="/">home</a> · <a href="/api/summary">api</a> <span class="cursor"></span></footer>
+</main>
 </body>
 </html>

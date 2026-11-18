@@ -6,4 +6,11 @@ __pycache__/
 data/events/*
 data/state/*
 data/db/*
+data/managed/*
 !data/**/.gitkeep
+# Firebase credentials and CLI cache — never commit
+*service-account*.json
+*-sa.json
+*firebase-adminsdk*.json
+.firebase/
+firebase-debug.log

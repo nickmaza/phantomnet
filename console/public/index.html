@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PhantomNet Console</title>
+<meta name="description" content="PhantomNet cloud console — manage network deception sensors from a terminal.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%230b0d0c'/%3E%3Ctext x='3' y='12' font-family='monospace' font-size='11' fill='%234ade80'%3E%3E%3C/text%3E%3C/svg%3E">
+<style>
+  :root { --bg:#0b0d0c; --fg:#c9d1c9; --dim:#6b756d; --green:#4ade80; --amber:#fbbf24;
+          --red:#f87171; --cyan:#67e8f9; --sel:#1f3b2a; }
+  * { box-sizing:border-box; }
+  html, body { margin:0; height:100%; background:var(--bg); color:var(--fg); }
+  body { font:14px/1.5 ui-monospace, "Cascadia Mono", Consolas, "Liberation Mono", Menlo, monospace; }
+  ::selection { background:var(--sel); }
+  #term { height:100%; overflow-y:auto; padding:16px; cursor:text; }
+  #out { white-space:pre-wrap; word-break:break-word; }
+  .line { min-height:1.5em; }
+  #inputline { display:flex; flex-wrap:wrap; white-space:pre-wrap; word-break:break-all; }
+  .prompt { color:var(--green); }
+  .prompt .path { color:var(--dim); }
+  #typed { color:var(--fg); }
+  .cursor { display:inline-block; width:.6em; background:var(--green); color:var(--bg);
+            animation:blink 1s steps(1) infinite; }
+  @keyframes blink { 50% { background:transparent; color:var(--fg); } }
+  #hidden { position:fixed; left:-1000px; top:0; opacity:0; width:1px; height:1px; }
+  .a1 { font-weight:bold; } .a2 { color:var(--dim); }
+  .a31 { color:var(--red); } .a32 { color:var(--green); } .a33 { color:var(--amber); } .a36 { color:var(--cyan); }
+  .busy::after { content:"…"; color:var(--dim); }
+  @media (max-width:640px) { body { font-size:13px; } #term { padding:12px 16px; } }
+</style>
+</head>
+<body>
+<div id="term" aria-live="polite">
+  <div id="out"></div>
+  <div id="inputline"><span id="prompt" class="prompt"></span><span id="typed"></span><span class="cursor" id="cur">&nbsp;</span></div>
+</div>
+<textarea id="hidden" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" aria-label="terminal input"></textarea>
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const out = $("out"), term = $("term"), hidden = $("hidden"), typedEl = $("typed"), promptEl = $("prompt"), curEl = $("cur");
+  const store = {
+    get(k) { try { return sessionStorage.getItem(k); } catch { return null; } },
+    set(k, v) { try { v == null ? sessionStorage.removeItem(k) : sessionStorage.setItem(k, v); } catch {} },
+    lget(k) { try { return localStorage.getItem(k); } catch { return null; } },
+    lset(k, v) { try { localStorage.setItem(k, v); } catch {} },
+  };
+  let session = JSON.parse(store.get("pn.session") || "null");
+  let sensor = store.get("pn.sensor") || "";
+  let history = JSON.parse(store.lget("pn.history") || "[]");
+  let hIndex = history.length, buf = "", pos = 0, busy = false, pending = null, comp = null;
+
+  // ---------- rendering ----------
+  const esc = (s) => s.replace(/[&<>]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[ch]));
+  function ansi(text) {
+    let html = "", open = [];
+    for (const part of String(text).split(/(\x1b\[[0-9;]*m)/)) {
+      const m = part.match(/^\x1b\[([0-9;]*)m$/);
+      if (!m) { html += esc(part); continue; }
+      for (const code of (m[1] || "0").split(";")) {
+        if (code === "0" || code === "") { html += "</span>".repeat(open.length); open = []; }
+        else { html += `<span class="a${code}">`; open.push(code); }
+      }
+    }
+    return html + "</span>".repeat(open.length);
+  }
+  function print(text = "") {
+    const div = document.createElement("div");
+    div.className = "line";
+    div.innerHTML = ansi(text);
+    out.appendChild(div);
+    term.scrollTop = term.scrollHeight;
+  }
+  const C = { red: "\x1b[31m", green: "\x1b[32m", yellow: "\x1b[33m", cyan: "\x1b[36m", dim: "\x1b[2m", bold: "\x1b[1m", r: "\x1b[0m" };
+  const col = (t, c) => `${C[c]}${t}${C.r}`;
+
+  function promptText() {
+    if (pending) return pending.label;
+    const who = session ? session.email.split("@")[0] : "guest";
+    return `<span>${esc(who)}@phantomnet</span>:<span class="path">${esc(sensor ? "~/" + sensor : "~")}</span>$ `;
+  }
+  function render() {
+    promptEl.innerHTML = promptText();
+    const shown = pending && pending.secret ? "•".repeat(buf.length) : buf;
+    typedEl.textContent = shown.slice(0, pos);
+    curEl.textContent = shown[pos] || " ";
+    curEl.nextSibling && curEl.nextSibling.remove();
+    if (pos < shown.length) curEl.insertAdjacentText("afterend", shown.slice(pos + 1));
+    $("inputline").classList.toggle("busy", busy);
+    $("inputline").style.visibility = busy ? "hidden" : "visible";
+    term.scrollTop = term.scrollHeight;
+  }
+
+  // ---------- API ----------
+  async function api(path, body, retry = true) {
+    const headers = { "Content-Type": "application/json" };
+    if (session) headers.Authorization = "Bearer " + session.access_token;
+    const res = await fetch(path, { method: body === undefined ? "GET" : "POST", headers,
+      body: body === undefined ? undefined : JSON.stringify(body) });
+    if (res.status === 401 && session && retry && session.refresh_token) {
+      const r = await fetch("/api/auth/refresh", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refresh_token: session.refresh_token }) });
+      if (r.ok) { setSession({ ...(await r.json()), email: session.email }); return api(path, body, false); }
+      setSession(null);
+    }
+    let data = {};
+    try { data = await res.json(); } catch {}
+    if (!res.ok) throw new Error(data.error || data.detail || `request failed (${res.status})`);
+    return data;
+  }
+  function setSession(s) {
+    session = s && s.access_token ? s : null;
+    store.set("pn.session", session ? JSON.stringify(session) : null);
+    comp = null;
+  }
+  function setSensor(name) { sensor = name || ""; store.set("pn.sensor", sensor || null); }
+
+  // ---------- prompts (login, wizard) ----------
+  function ask(label, { secret = false, def = "" } = {}) {
+    return new Promise((resolve, reject) => {
+      const hint = def !== "" ? col(` [${def}]`, "dim") : "";
+      pending = { label: ansi(label + hint + " "), secret, resolve, reject, def, raw: label + hint + " " };
+      buf = ""; pos = 0; busy = false; render();
+    });
+  }
+  async function yesno(q, def = true) {
+    for (;;) {
+      const a = (await ask(q, { def: def ? "Y/n" : "y/N" })).trim().toLowerCase();
+      if (!a || a === "y/n" || a === "y/n") return def;
+      if (["y", "yes"].includes(a)) return true;
+      if (["n", "no"].includes(a)) return false;
+      print(col("please answer y or n", "yellow"));
+    }
+  }
+
+  // ---------- client-side commands ----------
+  async function doLogin(signup) {
+    const email = (await ask("email:")).trim();
+    const password = await ask("password:", { secret: true });
+    if (signup) {
+      const again = await ask("confirm password:", { secret: true });
+      if (again !== password) return print(col("passwords don't match", "red"));
+    }
+    busy = true; render();
+    const data = await api(signup ? "/api/auth/signup" : "/api/auth/login", { email, password });
+    if (data.confirm_email) {
+      print(col("✓", "green") + ` account created. Check ${email} for a confirmation link, then run ` + col("login", "bold"));
+      return;
+    }
+    setSession({ ...data, email: data.email || email });
+    print(col("✓", "green") + ` signed in as ${session.email}`);
+    await runRemote("sensors");
+    print(col("new here? run ", "dim") + col("setup", "bold") + col(" for a guided walkthrough", "dim"));
+  }
+
+  async function wizard() {
+    print(col("PHANTOMNET SETUP", "green") + col("  — Enter keeps the value in [brackets], Ctrl+C cancels", "dim"));
+    const comps = await api("/api/completions");
+    let name = sensor;
+    if (!comps.sensors.length) {
+      print("\n" + col("1/7 sensor", "cyan") + "  a sensor is one PhantomNet box on a network you want to protect.");
+      name = (await ask("name for this sensor (e.g. office, home-lab):", { def: "home" })).trim() || "home";
+      await runRemote(`sensor add ${name}`);
+      await ask(col("copy the code above onto the sensor, then press Enter to continue", "dim"));
+    } else {
+      print("\n" + col("1/7 sensor", "cyan") + `  your sensors: ${comps.sensors.join(", ")}`);
+      name = (await ask("configure which sensor?", { def: sensor || comps.sensors[0] })).trim() || sensor || comps.sensors[0];
+      await runRemote(`use ${name}`);
+    }
+    const set = (k, v) => runRemote(`config set ${k} ${JSON.stringify(String(v))}`, true);
+
+    print("\n" + col("2/7 decoy address", "cyan") + "  the IP address the fake servers listen on. Reserve an unused one in your router.");
+    const ip = (await ask("decoy IP address:", { def: "127.0.0.1" })).trim();
+    if (ip) await set("decoys.bind_ip", ip);
+
+    print("\n" + col("3/7 decoys", "cyan") + "  which fake services to run");
+    for (const [d, label] of [["ssh", "fake SSH server (remote login)"], ["mysql", "fake MySQL database"], ["http", "fake admin web portal"]]) {
+      await set(`decoys.${d}`, (await yesno(`  run ${label}?`, true)) ? "on" : "off");
+    }
+
+    print("\n" + col("4/7 moving target", "cyan") + "  the web decoy changes identity on a random timer");
+    if (await yesno("  rotate personas automatically?", true)) {
+      await set("rotation.enabled", "on");
+      const lo = (await ask("  shortest gap (minutes):", { def: "30" })).trim() || "30";
+      const hi = (await ask("  longest gap (minutes):", { def: "60" })).trim() || "60";
+      // widen first so the min <= max check passes in either direction
+      await runRemote("config set rotation.interval_max_minutes 1440", true);
+      await set("rotation.interval_min_minutes", lo);
+      await set("rotation.interval_max_minutes", Math.max(+hi || 60, +lo || 30));
+    } else await set("rotation.enabled", "off");
+
+    print("\n" + col("5/7 bait", "cyan") + "  fake usernames hidden in the decoys. Anyone using one is almost certainly an intruder.");
+    const ht = (await ask("  honeytoken usernames (comma separated):", { def: "svc_deploy, backup_admin" })).trim();
+    if (ht) await set("honeytokens", ht);
+
+    print("\n" + col("6/7 authorized scanners", "cyan") + "  IPs of your own security scanners, so they don't raise alarms");
+    const sc = (await ask("  scanner IPs or ranges (blank for none):")).trim();
+    if (sc) await set("scanners", sc);
+
+    print("\n" + col("7/7 alerts", "cyan") + "  where to send notifications");
+    const hook = (await ask("  Slack/Teams/Discord webhook URL (blank to skip):")).trim();
+    if (hook) await set("alerts.webhook_url", hook);
+    const lvl = (await ask("  alert on severity at or above (low/medium/high):", { def: "medium" })).trim();
+    if (lvl) await set("alerts.min_severity", lvl);
+    if (hook && await yesno("  send a test alert now?", true)) await runRemote("alerts test");
+
+    print("\n" + col("✓ setup complete.", "green") + " the sensor applies these settings within ~15 seconds.");
+    print(col("  check with: ", "dim") + col("status", "bold") + col("  ·  watch for intruders: ", "dim") + col("incidents", "bold"));
+  }
+
+  const LOCAL_HELP = [
+    col("PhantomNet console", "green"),
+    "",
+    "  " + col("login", "bold") + "     sign in",
+    "  " + col("signup", "bold") + "    create an account",
+    "  " + col("help", "bold") + "      all commands (after signing in)",
+    "  " + col("clear", "bold") + "     clear the screen",
+  ].join("\n");
+
+  async function runRemote(line, quiet = false) {
+    const r = await api("/api/command", { line, sensor: sensor || null });
+    if (r.sensor !== null && r.sensor !== undefined) setSensor(r.sensor);
+    if (r.output && (!quiet || !r.ok)) print(r.output);
+    else if (quiet && r.ok) print("  " + r.output.split("\n")[0]);
+    if (r.download) {
+      const url = URL.createObjectURL(new Blob([r.download.content], { type: "application/json" }));
+      const a = Object.assign(document.createElement("a"), { href: url, download: r.download.filename });
+      document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+    return r;
+  }
+
+  async function execute(line) {
+    const word = line.trim().split(/\s+/)[0].toLowerCase();
+    if (!word) return;
+    if (word === "clear") { out.innerHTML = ""; return; }
+    if (word === "login" || word === "signup") return doLogin(word === "signup");
+    if (word === "logout") { setSession(null); setSensor(""); return print("signed out."); }
+    if (!session) {
+      if (word === "help") return print(LOCAL_HELP);
+      return print(col("not signed in.", "yellow") + " run " + col("login", "bold") + " or " + col("signup", "bold"));
+    }
+    if (word === "setup") return wizard();
+    await runRemote(line);
+  }
+
+  // ---------- completion ----------
+  async function complete() {
+    if (pending) return;
+    if (!comp) {
+      try { comp = session ? await api("/api/completions") : { commands: ["login", "signup", "help", "clear"], sub: {} }; }
+      catch { return; }
+    }
+    const words = buf.slice(0, pos).split(/\s+/);
+    const cur = words[words.length - 1];
+    let pool = [];
+    if (words.length === 1) pool = comp.commands;
+    else if (words.length === 2) pool = (comp.sub[words[0]] || []).concat(["use", "status", "incidents"].includes(words[0]) ? comp.sensors || [] : []);
+    else if (words[0] === "config" && ["set", "reset", "show"].includes(words[1]) && words.length === 3) pool = comp.keys;
+    else if (words[0] === "persona" && words[1] === "rotate") pool = comp.personas;
+    else if (words[0] === "sensor" && ["remove", "code"].includes(words[1])) pool = comp.sensors || [];
+    const hits = pool.filter((p) => p.startsWith(cur));
+    if (hits.length === 1) insert(hits[0].slice(cur.length) + " ");
+    else if (hits.length > 1) {
+      let common = hits[0];
+      for (const h of hits) while (!h.startsWith(common)) common = common.slice(0, -1);
+      if (common.length > cur.length) insert(common.slice(cur.length));
+      else { print(promptPlain() + buf); print(hits.join("   ")); }
+    }
+  }
+  const promptPlain = () => promptEl.textContent;
+  function insert(s) { buf = buf.slice(0, pos) + s + buf.slice(pos); pos += s.length; render(); }
+
+  // ---------- input ----------
+  async function submit() {
+    const line = buf;
+    if (pending) {
+      const p = pending; pending = null;
+      print("");
+      out.lastChild.innerHTML = p.label + esc(p.secret ? "•".repeat(line.length) : line);
+      buf = ""; pos = 0; render();
+      p.resolve(line === "" ? p.def : line);
+      return;
+    }
+    print(""); out.lastChild.innerHTML = promptText() + esc(line);
+    buf = ""; pos = 0;
+    if (line.trim()) {
+      if (history[history.length - 1] !== line) history.push(line);
+      history = history.slice(-200); store.lset("pn.history", JSON.stringify(history));
+    }
+    hIndex = history.length;
+    busy = true; render();
+    try { await execute(line); }
+    catch (e) { if (e && e.message !== "cancelled") print(col("error: ", "red") + (e.message || e)); }
+    finally { busy = false; pending = null; render(); }
+  }
+
+  hidden.addEventListener("keydown", (e) => {
+    if (busy && !pending) { e.preventDefault(); return; }
+    const k = e.key;
+    if (k === "Enter") { e.preventDefault(); submit(); }
+    else if (k === "Backspace") { e.preventDefault(); if (pos > 0) { buf = buf.slice(0, pos - 1) + buf.slice(pos); pos--; render(); } }
+    else if (k === "Delete") { e.preventDefault(); buf = buf.slice(0, pos) + buf.slice(pos + 1); render(); }
+    else if (k === "ArrowLeft") { e.preventDefault(); pos = Math.max(0, pos - 1); render(); }
+    else if (k === "ArrowRight") { e.preventDefault(); pos = Math.min(buf.length, pos + 1); render(); }
+    else if (k === "Home") { e.preventDefault(); pos = 0; render(); }
+    else if (k === "End") { e.preventDefault(); pos = buf.length; render(); }
+    else if (k === "Tab") { e.preventDefault(); complete(); }
+    else if (k === "ArrowUp" && !pending) { e.preventDefault(); if (hIndex > 0) { buf = history[--hIndex]; pos = buf.length; render(); } }
+    else if (k === "ArrowDown" && !pending) { e.preventDefault(); hIndex = Math.min(history.length, hIndex + 1); buf = history[hIndex] || ""; pos = buf.length; render(); }
+    else if ((e.ctrlKey || e.metaKey) && k.toLowerCase() === "c" && !window.getSelection().toString()) {
+      e.preventDefault();
+      print(promptPlain() + buf + "^C");
+      buf = ""; pos = 0;
+      if (pending) { const p = pending; pending = null; busy = false; p.reject(new Error("cancelled")); }
+      render();
+    }
+    else if ((e.ctrlKey || e.metaKey) && k.toLowerCase() === "l") { e.preventDefault(); out.innerHTML = ""; }
+  });
+  hidden.addEventListener("input", () => {
+    const v = hidden.value.replace(/\r?\n/g, "");
+    hidden.value = "";
+    if (v && !(busy && !pending)) insert(v);
+  });
+  term.addEventListener("mouseup", () => { if (!window.getSelection().toString()) hidden.focus(); });
+  window.addEventListener("focus", () => hidden.focus());
+
+  // ---------- boot ----------
+  print(col(" ┌─┐┬ ┬┌─┐┌┐┌┌┬┐┌─┐┌┬┐┌┐┌┌─┐┌┬┐", "green"));
+  print(col(" ├─┘├─┤├─┤│││ │ │ ││││││││├┤  │ ", "green"));
+  print(col(" ┴  ┴ ┴┴ ┴┘└┘ ┴ └─┘┴ ┴┘└┘└─┘ ┴ ", "green"));
+  print(col(" network deception console", "dim"));
+  print("");
+  if (session) {
+    print(`signed in as ${session.email}. type ` + col("help", "bold") + " for commands.");
+    api("/api/command", { line: "sensors", sensor: sensor || null }).then((r) => { print(r.output); render(); }).catch((e) => { print(col(e.message, "yellow")); render(); });
+  } else {
+    print("type " + col("login", "bold") + " to sign in, or " + col("signup", "bold") + " to create an account.");
+  }
+  render();
+  hidden.focus();
+})();
+</script>
+</body>
+</html>

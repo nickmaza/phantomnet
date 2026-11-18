@@ -92,4 +92,59 @@ def load_policy(path: str | os.PathLike | None = None) -> Policy:
                               ((raw.get("honeytokens") or {}).get("usernames") or [])}
     if "high_value_services" in raw:
         p.high_value_services = {str(s).lower() for s in raw["high_value_services"] or []}
+    return apply_managed(p, read_managed_config())
+
+
+# --- settings pushed from the cloud console --------------------------------
+
+def managed_dir() -> Path:
+    return Path(os.environ.get("PN_MANAGED_DIR", "data/managed"))
+
+
+def read_managed_config() -> dict:
+    """Settings last received from the console ({} when not cloud-managed)."""
+    try:
+        import json
+        data = json.loads((managed_dir() / "config.json").read_text(encoding="utf-8"))
+        return (data.get("config") or {}) if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def apply_managed(p: Policy, cfg: dict) -> Policy:
+    """Overlay console-managed settings. Each value is re-validated here: the
+    sensor never trusts its input, even from its own console."""
+    if not cfg:
+        return p
+
+    def num(key, lo, hi):
+        v = cfg.get(key)
+        return v if isinstance(v, int) and not isinstance(v, bool) and lo <= v <= hi else None
+
+    if isinstance(cfg.get("rotation.enabled"), bool):
+        p.rotation_enabled = cfg["rotation.enabled"]
+    lo, hi = num("rotation.interval_min_minutes", 5, 1440), num("rotation.interval_max_minutes", 5, 1440)
+    if lo and hi and lo <= hi:
+        p.interval_min_minutes, p.interval_max_minutes = float(lo), float(hi)
+    profiles = cfg.get("rotation.profiles")
+    if isinstance(profiles, list) and profiles and all(isinstance(x, str) for x in profiles):
+        p.web_profiles = profiles[:10]
+    tokens = cfg.get("honeytokens")
+    if isinstance(tokens, list):
+        p.honeytoken_usernames = {str(t).lower()[:64] for t in tokens[:50]}
+    scanners = cfg.get("scanners")
+    if isinstance(scanners, list):
+        nets = []
+        for n in scanners[:50]:
+            try:
+                nets.append(ipaddress.ip_network(str(n), strict=False))
+            except ValueError:
+                continue
+        p.authorized_scanners = nets
+    if cfg.get("alerts.min_severity") in SEVERITY_RANK:
+        p.alert_min_severity = cfg["alerts.min_severity"]
+    for key in p.scoring:
+        v = num(f"scoring.{key}", 0, 100)
+        if v is not None:
+            p.scoring[key] = v
     return p

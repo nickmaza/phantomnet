@@ -1,59 +1,54 @@
 {% extends "base.html" %}
 {% block title %}Incident #{{ inc.id }} · PhantomNet{% endblock %}
+{% block sensor %}{{ alert.sensor_id }}{% endblock %}
+{% block path %}~/incidents{% endblock %}
+{% block cmd %}show {{ inc.id }}{% endblock %}
 {% block content %}
-<p><a href="/">← Overview</a></p>
-<section class="cards">
-  <div class="card"><div class="label">Incident</div><div class="value">#{{ inc.id }}</div>
-    <div class="sub"><span class="sev sev-{{ inc.severity }}">{{ inc.severity }}</span> · score {{ inc.score }}</div></div>
-  <div class="card"><div class="label">Source</div><div class="value" style="font-size:20px"><code>{{ inc.source_ip }}</code></div>
-    <div class="sub">{{ inc.event_count }} event(s)</div></div>
-  <div class="card"><div class="label">Decoys contacted</div><div class="value" style="font-size:20px">{{ inc.services | sort | join(", ") or "—" }}</div></div>
-  <div class="card"><div class="label">Window</div><div class="sub">{{ inc.first_seen | ts }}<br>→ {{ inc.last_seen | ts }}</div></div>
-</section>
+<h2>INCIDENT #{{ inc.id }}</h2>
+<table>
+  <tr><td class="dim">severity</td><td class="sev-{{ inc.severity }}">{{ inc.severity | upper }}</td></tr>
+  <tr><td class="dim">score</td><td>{{ inc.score }} / 100</td></tr>
+  <tr><td class="dim">source</td><td>{{ inc.source_ip }}</td></tr>
+  <tr><td class="dim">decoys contacted</td><td>{{ inc.services | sort | join(", ") or "-" }}</td></tr>
+  <tr><td class="dim">events</td><td>{{ inc.event_count }}</td></tr>
+  <tr><td class="dim">window</td><td>{{ inc.first_seen | ts }} -> {{ inc.last_seen | ts }}</td></tr>
+</table>
 
-<section class="grid2">
-  <div class="panel">
-    <h2>What happened</h2>
-    <p>{{ alert.summary }}</p>
-    {% if alert.findings %}<ul>{% for f in alert.findings %}<li>{{ f }}</li>{% endfor %}</ul>{% endif %}
-  </div>
-  <div class="panel">
-    <h2>Suggested response</h2>
-    <ul>{% for g in alert.guidance %}<li>{{ g }}</li>{% endfor %}</ul>
-    <p><a href="/api/incidents/{{ inc.id }}/export">Download redacted evidence (JSON)</a></p>
-  </div>
-</section>
+<h2>WHAT HAPPENED</h2>
+<div class="block">{{ alert.summary }}</div>
+{% if alert.findings %}<ul class="plain">{% for f in alert.findings %}<li>{{ f }}</li>{% endfor %}</ul>{% endif %}
 
-<section class="panel" style="margin-top:12px">
-  <h2>Timeline</h2>
-  <div class="table-wrap">
-  <table>
-    <tr><th>Time</th><th>Service</th><th>Profile</th><th>Event</th><th>User</th><th>+Risk</th><th>Details</th></tr>
-    {% for e in events %}
-    <tr {% if not e.source_ip %}class="muted"{% endif %}>
-      <td style="white-space:nowrap">{{ e.ts | ts }}</td>
-      <td>{{ e.destination_service or "controller" }}</td>
-      <td>{{ e.decoy_profile or "—" }}</td>
-      <td>{{ e.event_type }}</td>
-      <td>{% if e.username %}<code>{{ e.username }}</code>{% endif %}</td>
-      <td>{{ e.risk_score or "" }}</td>
-      <td><code>{{ e.details | tojson }}</code></td>
-    </tr>
-    {% endfor %}
-  </table>
-  </div>
-</section>
+<h2>SUGGESTED RESPONSE</h2>
+<ul class="plain">{% for g in alert.guidance %}<li>{{ g }}</li>{% endfor %}</ul>
+<div style="margin-top:6px"><a href="/api/incidents/{{ inc.id }}/export">[download redacted evidence .json]</a></div>
 
-<section class="panel" style="margin-top:12px">
-  <h2>Notifications</h2>
-  {% if alerts %}
-  <table>
-    <tr><th>Time</th><th>Severity</th><th>Channel</th><th>Status</th><th>Error</th></tr>
-    {% for a in alerts %}
-    <tr><td>{{ a.created | ts }}</td><td>{{ a.severity }}</td><td>{{ a.channel }}</td>
-        <td class="{{ 'ok' if a.status == 'sent' else 'bad' }}">{{ a.status }}</td><td class="muted">{{ a.error or "" }}</td></tr>
-    {% endfor %}
-  </table>
-  {% else %}<p class="muted">No notifications sent for this incident (below alert threshold).</p>{% endif %}
-</section>
+<h2>TIMELINE</h2>
+<div class="scroll">
+<table>
+  <tr><th>TIME</th><th>SERVICE</th><th>PROFILE</th><th>EVENT</th><th>USER</th><th>+RISK</th><th>DETAILS</th></tr>
+  {% for e in events %}
+  <tr {% if not e.source_ip %}class="dim"{% endif %}>
+    <td>{{ e.ts | ts }}</td>
+    <td>{{ e.destination_service or "controller" }}</td>
+    <td>{{ e.decoy_profile or "-" }}</td>
+    <td>{{ e.event_type }}</td>
+    <td>{{ e.username or "" }}</td>
+    <td>{% if e.risk_score %}<span class="warn">+{{ e.risk_score }}</span>{% endif %}</td>
+    <td class="wrap dim">{{ e.details | tojson }}</td>
+  </tr>
+  {% endfor %}
+</table>
+</div>
+
+<h2>NOTIFICATIONS</h2>
+{% if alerts %}
+<table>
+  <tr><th>TIME</th><th>SEV</th><th>CHANNEL</th><th>STATUS</th><th>ERROR</th></tr>
+  {% for a in alerts %}
+  <tr><td class="dim">{{ a.created | ts }}</td><td class="sev-{{ a.severity }}">{{ a.severity | upper }}</td>
+      <td>{{ a.channel }}</td><td class="{{ 'ok' if a.status == 'sent' else 'bad' }}">{{ a.status }}</td>
+      <td class="dim">{{ a.error or "" }}</td></tr>
+  {% endfor %}
+</table>
+{% else %}<div class="dim">no notifications sent (below alert threshold).</div>{% endif %}
 {% endblock %}

@@ -119,3 +119,53 @@ def test_next_delay_within_policy(tmp_path, profiles, policy):
     r = make_rotator(tmp_path, profiles, policy, lambda: None)
     for _ in range(50):
         assert 30 * 60 <= r.next_delay() <= 60 * 60
+
+
+def test_console_rotation_settings_and_requests(tmp_path, profiles, policy, monkeypatch, root):
+    managed = tmp_path / "managed"
+    (managed / "requests").mkdir(parents=True)
+    monkeypatch.setenv("PN_MANAGED_DIR", str(managed))
+    applied = {}
+
+    def health():
+        return {"ok": True, "profile_id": applied.get("id"), "generation": applied.get("gen")}
+
+    r = make_rotator(tmp_path, profiles, policy, health)
+    r.policy_path = str(root / "config" / "policies.yaml")
+    orig = r._write_state
+
+    def write_and_apply(profile, gen, prev):
+        out = orig(profile, gen, prev)
+        applied.update(id=profile["id"], gen=gen)
+        return out
+
+    r._write_state = write_and_apply
+    r.ensure_initial()
+    applied.update(id="linux-server", gen=1)
+
+    # settings pushed by the console
+    (managed / "config.json").write_text(json.dumps({"version": 2, "config": {
+        "rotation.interval_min_minutes": 10, "rotation.interval_max_minutes": 15,
+        "rotation.profiles": ["linux-server", "admin-portal"], "rotation.enabled": False}}))
+    assert r.reload_policy_if_changed() is True
+    assert (r.policy.interval_min_minutes, r.policy.interval_max_minutes) == (10, 15)
+    assert r.eligible == ["linux-server", "admin-portal"] and r.policy.rotation_enabled is False
+    assert r.reload_policy_if_changed() is False          # unchanged file -> no reload
+
+    # garbage from the console is ignored, not applied
+    (managed / "config.json").write_text(json.dumps({"version": 3, "config": {
+        "rotation.interval_min_minutes": -5, "rotation.profiles": "nope"}}))
+    import os, time as _t
+    os.utime(managed / "config.json", (_t.time() + 5, _t.time() + 5))
+    r.reload_policy_if_changed()
+    assert r.policy.interval_min_minutes == 30            # defaults, not -5
+
+    # "rotate now" request from the console
+    (managed / "requests" / "rotate-7.json").write_text(json.dumps({"id": 7, "profile": "admin-portal"}))
+    (managed / "requests" / "rotate-8.json").write_text(json.dumps({"id": 8, "profile": "evil-persona"}))
+    assert r.process_requests() == 2
+    res7 = json.loads((tmp_path / "state" / "action_results" / "7.json").read_text())
+    res8 = json.loads((tmp_path / "state" / "action_results" / "8.json").read_text())
+    assert res7["status"] == "done" and res7["result"]["active"] == "admin-portal"
+    assert res8["status"] == "failed" and "unknown persona" in res8["result"]["error"]
+    assert r.process_requests() == 0                      # never re-run a finished request

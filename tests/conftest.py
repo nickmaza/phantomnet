@@ -10,6 +10,12 @@ from detection.policy import load_policy  # noqa: E402
 from detection.store import Store  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def isolated_managed_dir(tmp_path, monkeypatch):
+    # Never let a real data/managed/ (cloud settings) leak into tests.
+    monkeypatch.setenv("PN_MANAGED_DIR", str(tmp_path / "managed"))
+
+
 @pytest.fixture
 def root() -> Path:
     return ROOT

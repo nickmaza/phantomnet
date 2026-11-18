@@ -84,10 +84,12 @@ services:
       PN_EVENTS_DIR: /data/events
       PN_NODE_ID: ${PN_NODE_ID:-phantomnet-01}
       PN_WEB_HEALTH_URL: http://phantomnet-web:9090/health
+      PN_MANAGED_DIR: /data/managed
     volumes:
       - ./config:/app/config:ro
       - ./data/state:/data/state
       - ./data/events:/data/events
+      - ./data/managed:/data/managed:ro
     # Internal network only: no internet, no published ports, no Docker socket,
     # no permission to touch host firewall rules.
     networks: [backend-net]
@@ -108,8 +110,12 @@ services:
       PN_EVENTS_DIR: /data/events
       PN_DB_PATH: /data/db/phantomnet.sqlite3
       PN_STATE_DIR: /data/state
-      PN_WEB_HEALTH_URL: http://phantomnet-web:9090/health
+      PN_MANAGED_DIR: /data/managed
       PN_NODE_ID: ${PN_NODE_ID:-phantomnet-01}
+      # Optional cloud console (outbound HTTPS only). Leave empty for standalone.
+      PN_CLOUD_URL: ${PN_CLOUD_URL:-}
+      PN_ENROLL_CODE: ${PN_ENROLL_CODE:-}
+      PN_CLOUD_ALLOW_INSECURE: ${PN_CLOUD_ALLOW_INSECURE:-0}  # dev only; never in production
       PN_ADMIN_USER: ${PN_ADMIN_USER:-admin}
       PN_ADMIN_PASSWORD: ${PN_ADMIN_PASSWORD:?Set PN_ADMIN_PASSWORD in .env}
       PN_WEBHOOK_URL: ${PN_WEBHOOK_URL:-}
@@ -123,6 +129,7 @@ services:
       - ./config:/app/config:ro
       - ./data/events:/data/events:ro
       - ./data/state:/data/state:ro
+      - ./data/managed:/data/managed
       - ./data/db:/data/db
     # Core shares no network with any decoy. Web decoy health reaches it via the
     # controller's status file. alert-net is a normal bridge so webhooks/email

@@ -67,6 +67,21 @@ ssh -L 8800:127.0.0.1:8800 admin@phantomnet-host   # then browse http://127.0.0.
 Then follow [docs/TESTING.md](docs/TESTING.md) before you bind decoys to a real
 network address ([docs/NETWORK.md](docs/NETWORK.md)).
 
+## Cloud console (optional)
+
+Manage every sensor from a browser terminal hosted on Vercel, with accounts and
+data in Firebase. Sensors connect **out** to the console; nothing connects in.
+
+```
+you@phantomnet:~/office$ incidents
+ID  SEV   SCORE  SOURCE       DECOYS          STATUS  LAST SEEN
+#2  HIGH  100    10.0.4.17    http            open    31s ago
+you@phantomnet:~/office$ honeytokens add svc_backup
+✓ honeytokens = svc_deploy, backup_admin, svc_backup  [office config v2]
+```
+
+Setup, commands and security model: [docs/CONSOLE.md](docs/CONSOLE.md).
+
 ## Repository layout
 
 ```
@@ -80,6 +95,7 @@ controller/               profile validation + rotator
 detection/                schema/redaction, collector, correlator, alerts, SQLite store
 dashboard/                FastAPI security console
 scripts/                  install, uninstall, isolation, verification, smoke test
+console/                  cloud console (Vercel + Firebase): terminal UI, API, sensor sync
 tests/                    unit + integration tests (pytest)
 docs/                     INSTALL, NETWORK, SECURITY, TESTING
 ```

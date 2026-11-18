@@ -1,78 +1,73 @@
 {% extends "base.html" %}
-{% block sensor %}sensor {{ s.sensor_id }}{% endblock %}
+{% block sensor %}{{ s.sensor_id }}{% endblock %}
 {% block content %}
-<section class="cards">
-  <div class="card"><div class="label">Decoy services</div><div class="value">{{ s.decoys_configured }}</div>
-    <div class="sub">SSH · MySQL · web portal</div></div>
-  <div class="card"><div class="label">Suspicious events (24h)</div><div class="value">{{ s.events_24h }}</div>
-    <div class="sub">Any touch on a decoy is unexpected</div></div>
-  <div class="card"><div class="label">High-risk incidents (24h)</div>
-    <div class="value {% if s.high_risk_incidents %}bad{% endif %}">{{ s.high_risk_incidents }}</div>
-    <div class="sub">Need analyst review</div></div>
-  <div class="card"><div class="label">Active web persona</div>
-    <div class="value" style="font-size:18px">{{ s.active_profile_name or s.active_profile or "—" }}</div>
-    <div class="sub">Next rotation: {{ s.next_rotation_at | ts }}</div></div>
-</section>
+<h2>SUMMARY</h2>
+<table>
+  <tr><td class="dim">decoy services</td><td>{{ s.decoys_configured }} <span class="dim">(ssh, mysql, web portal)</span></td></tr>
+  <tr><td class="dim">events, last 24h</td><td>{{ s.events_24h }}</td></tr>
+  <tr><td class="dim">high-risk incidents, 24h</td><td class="{{ 'bad' if s.high_risk_incidents else 'ok' }}">{{ s.high_risk_incidents }}</td></tr>
+  <tr><td class="dim">active web persona</td><td>{{ s.active_profile_name or s.active_profile or "-" }}</td></tr>
+  <tr><td class="dim">next rotation</td><td>{{ s.next_rotation_at | ts }}</td></tr>
+</table>
 
-<section class="grid2">
-  <div class="panel">
-    <h2>Activity</h2>
-    {% if timeline %}
-    <ul class="feed">
-      {% for item in timeline %}
-      <li>
-        <span class="sev sev-{{ item.severity }}">{{ item.severity }}</span>
-        {% if item.link %}<a href="{{ item.link }}">{{ item.title }}</a>{% else %}{{ item.title }}{% endif %}
-        <div class="t">{{ item.ts | ts }} · {{ item.detail }}</div>
-      </li>
-      {% endfor %}
-    </ul>
-    {% else %}<p class="muted">No activity yet. Decoys are waiting.</p>{% endif %}
-  </div>
-  <div>
-    <div class="panel">
-      <h2>Sensor health</h2>
-      <table>
-        {% for c in s.components %}
-        <tr><td>{{ c.name }}<div class="muted" style="font-size:12px">{{ c.detail }}</div></td>
-            <td class="{{ 'ok' if c.status in ('healthy','running','reporting') else 'warn' }}">{{ c.status }}</td>
-            <td class="muted" style="font-size:12px">{{ c.last_event | ts }}</td></tr>
-        {% endfor %}
-      </table>
-    </div>
-    <div class="panel" style="margin-top:12px">
-      <h2>Isolation check</h2>
-      {% if s.isolation_check %}
-        <p class="{{ 'ok' if s.isolation_check.passed else 'bad' }}">
-          {{ 'Passed' if s.isolation_check.passed else 'FAILED' }} at {{ s.isolation_check.checked_at }}</p>
-        <ul class="muted" style="font-size:12px;padding-left:18px">
-          {% for r in s.isolation_check.results %}<li>{{ r.target }}: {{ r.result }}</li>{% endfor %}
-        </ul>
-      {% else %}
-        <p class="warn">Never run. Run <code>scripts/verify-isolation.sh</code> on the host.</p>
-      {% endif %}
-    </div>
-  </div>
-</section>
-
-<section class="panel" style="margin-top:12px">
-  <h2>Incidents</h2>
-  <div class="table-wrap">
-  <table>
-    <tr><th>#</th><th>Severity</th><th>Source</th><th>Services</th><th>Score</th><th>Events</th><th>First seen</th><th>Last seen</th></tr>
-    {% for i in incidents %}
-    <tr>
-      <td><a href="/incidents/{{ i.id }}">{{ i.id }}</a></td>
-      <td><span class="sev sev-{{ i.severity }}">{{ i.severity }}</span></td>
-      <td><code>{{ i.source_ip }}</code></td>
-      <td>{{ i.services | sort | join(", ") }}</td>
-      <td>{{ i.score }}</td><td>{{ i.event_count }}</td>
-      <td class="muted">{{ i.first_seen | ts }}</td><td class="muted">{{ i.last_seen | ts }}</td>
-    </tr>
+<h2>SENSOR HEALTH</h2>
+<div class="scroll">
+<table>
+  {% for c in s.components %}
+  {% set good = c.status in ('healthy','running','reporting') %}
+  <tr>
+    <td class="{{ 'ok' if good else 'warn' }}">[{{ ' OK ' if good else 'WARN' }}]</td>
+    <td>{{ c.name }}</td>
+    <td class="{{ 'ok' if good else 'warn' }}">{{ c.status }}</td>
+    <td class="dim wrap wide-only">{{ c.detail }}</td>
+    <td class="dim wrap wide-only">last event {{ c.last_event | ts }}</td>
+  </tr>
+  {% endfor %}
+  <tr>
+    {% if s.isolation_check %}
+    <td class="{{ 'ok' if s.isolation_check.passed else 'bad' }}">[{{ ' OK ' if s.isolation_check.passed else 'FAIL' }}]</td>
+    <td>Isolation check</td>
+    <td class="{{ 'ok' if s.isolation_check.passed else 'bad' }}">{{ 'passed' if s.isolation_check.passed else 'FAILED' }}</td>
+    <td class="dim wrap wide-only">{{ s.isolation_check.results | length }} probe(s)</td>
+    <td class="dim wrap wide-only">checked {{ s.isolation_check.checked_at }}</td>
     {% else %}
-    <tr><td colspan="8" class="muted">No incidents.</td></tr>
-    {% endfor %}
-  </table>
-  </div>
-</section>
+    <td class="warn">[WARN]</td><td>Isolation check</td><td class="warn">never run</td>
+    <td class="dim wrap wide-only" colspan="2">run scripts/verify-isolation.sh on the host</td>
+    {% endif %}
+  </tr>
+</table>
+</div>
+
+<h2>ACTIVITY</h2>
+{% if timeline %}
+<table>
+  {% for item in timeline %}
+  <tr>
+    <td class="dim">{{ item.ts | ts }}</td>
+    <td class="sev-{{ item.severity }}">{{ item.severity | upper }}</td>
+    <td class="wrap">{% if item.link %}<a href="{{ item.link }}">{{ item.title }}</a>{% else %}{{ item.title }}{% endif %}
+      <span class="dim">· {{ item.detail }}</span></td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}<div class="dim">no activity yet. decoys are waiting.</div>{% endif %}
+
+<h2>INCIDENTS</h2>
+<div class="scroll">
+<table>
+  <tr><th>ID</th><th>SEV</th><th>SOURCE</th><th>SERVICES</th><th>SCORE</th><th>EVENTS</th><th>FIRST SEEN</th><th>LAST SEEN</th></tr>
+  {% for i in incidents %}
+  <tr>
+    <td><a href="/incidents/{{ i.id }}">#{{ i.id }}</a></td>
+    <td class="sev-{{ i.severity }}">{{ i.severity | upper }}</td>
+    <td>{{ i.source_ip }}</td>
+    <td>{{ i.services | sort | join(",") }}</td>
+    <td>{{ i.score }}</td><td>{{ i.event_count }}</td>
+    <td class="dim">{{ i.first_seen | ts }}</td><td class="dim">{{ i.last_seen | ts }}</td>
+  </tr>
+  {% else %}
+  <tr><td colspan="8" class="dim">no incidents.</td></tr>
+  {% endfor %}
+</table>
+</div>
 {% endblock %}

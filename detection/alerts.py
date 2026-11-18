@@ -91,6 +91,27 @@ class AlertSettings:
                    smtp_password=e("PN_SMTP_PASSWORD", ""), smtp_from=e("PN_SMTP_FROM", ""),
                    smtp_to=e("PN_SMTP_TO", ""), sensor_id=e("PN_NODE_ID", "phantomnet-01"))
 
+    def with_managed(self, cfg: dict) -> "AlertSettings":
+        """Console-managed alert settings override the .env values when present."""
+        if not cfg:
+            return self
+        from dataclasses import replace
+        m = {"webhook_url": "alerts.webhook_url", "smtp_host": "alerts.email.host",
+             "smtp_port": "alerts.email.port", "smtp_user": "alerts.email.user",
+             "smtp_password": "alerts.email.password", "smtp_from": "alerts.email.from",
+             "smtp_to": "alerts.email.to"}
+        changes = {}
+        for attr, key in m.items():
+            v = cfg.get(key)
+            if attr == "smtp_port":
+                if isinstance(v, int) and 0 < v < 65536:
+                    changes[attr] = v
+            elif isinstance(v, str) and (v or key in cfg):
+                if attr == "webhook_url" and v and not v.startswith("https://"):
+                    continue
+                changes[attr] = v
+        return replace(self, **changes)
+
 
 class AlertDispatcher:
     def __init__(self, store: Store, policy: Policy, settings: AlertSettings):

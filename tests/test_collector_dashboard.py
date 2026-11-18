@@ -105,7 +105,7 @@ def test_dashboard_views_and_redacted_export(env, store):
     assert "Storage appliance" in page and "Decoy profile rotated" in page
     inc_id = store.incidents()[0]["id"]
     detail = client.get(f"/incidents/{inc_id}", headers=h)
-    assert detail.status_code == 200 and "Suggested response" in detail.text
+    assert detail.status_code == 200 and "suggested response" in detail.text.lower()
     export = client.get(f"/api/incidents/{inc_id}/export", headers=h)
     assert export.status_code == 200 and "TopSecretPw1" not in export.text
     assert export.json()["evidence"][0]["details"]["password_length"] == 12

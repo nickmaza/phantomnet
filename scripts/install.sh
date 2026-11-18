@@ -39,7 +39,7 @@ if [[ "${DECOY_BIND_IP:-127.0.0.1}" != "127.0.0.1" ]] && ! ip -4 addr | grep -q 
 fi
 
 say "Creating data directories"
-mkdir -p data/events data/state data/db
+mkdir -p data/events data/state data/db data/managed
 chown -R 10001:10001 data
 chmod 750 data/db
 
