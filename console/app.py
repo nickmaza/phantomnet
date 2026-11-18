@@ -36,7 +36,10 @@ MAX_EVIDENCE = 20
 def build_backends():
     if os.environ.get("PN_CONSOLE_DEV") == "1":
         return MemoryStore(), MemoryAuth()
-    sa, api_key = os.environ.get("FIREBASE_SERVICE_ACCOUNT", ""), os.environ.get("FIREBASE_API_KEY", "")
+    # Tolerate copy-paste slips in the dashboard: surrounding whitespace/quotes.
+    clean = lambda v: v.strip().strip('"').strip("'").strip()
+    sa = os.environ.get("FIREBASE_SERVICE_ACCOUNT", "").strip()
+    api_key = clean(os.environ.get("FIREBASE_API_KEY", ""))
     if sa and api_key:
         from pnconsole.auth import FirebaseAuth
         from pnconsole.firestore_store import FirestoreStore
